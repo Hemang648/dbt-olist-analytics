@@ -1,0 +1,33 @@
+# ---- dbt generated ----
+target/
+dbt_packages/
+dbt_internal_packages/
+logs/
+
+# ---- DuckDB database files ----
+*.duckdb
+*.duckdb.wal
+
+# ---- Credentials / local config ----
+profiles.yml
+.env
+*.env
+
+# ---- Python virtual environments ----
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# ---- Raw Olist data (large, downloaded from Kaggle) ----
+# **/ makes the rule work no matter which folder it sits in
+**/data/raw/
+
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

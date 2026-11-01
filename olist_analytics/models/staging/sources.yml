@@ -1,0 +1,28 @@
+version: 2
+
+sources:
+  - name: olist       # WRITTEN IN THE .SQL files, this is the source name used in the source() function
+    schema: raw
+    description: Raw Olist e-commerce CSVs loaded as-is (all columns as text).
+    tables:
+      - name: customers
+        columns:
+          - name: customer_id
+            data_tests: [unique, not_null]
+      - name: orders
+        columns:
+          - name: order_id
+            data_tests: [unique, not_null]
+      - name: order_items
+      - name: order_payments
+      - name: order_reviews
+      - name: products
+        columns:
+          - name: product_id
+            data_tests: [unique, not_null]
+      - name: sellers
+        columns:
+          - name: seller_id
+            data_tests: [unique, not_null]
+      - name: geolocation
+      - name: product_category_translation
