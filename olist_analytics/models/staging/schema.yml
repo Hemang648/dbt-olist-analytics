@@ -1,6 +1,12 @@
 version: 2
 
 models:
+  - name: stg_product_category_translation
+    description: One row per Portuguese category name with its English translation.
+    columns:
+      - name: category_name
+        data_tests: [unique, not_null]
+        
   - name: stg_customers
     description: One row per order-level customer id. customer_unique_id identifies the real person.
     columns:
