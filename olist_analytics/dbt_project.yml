@@ -42,5 +42,5 @@ models:
       +materialized: table
       +tags: ['marts']
     
-    vars:
-      orders_lookback_days: 30
+vars:
+  orders_lookback_days: 30
