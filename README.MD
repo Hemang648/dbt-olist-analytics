@@ -1,14 +1,17 @@
 # Olist E-Commerce Analytics with dbt Core and DuckDB
 
-An end-to-end analytics engineering project built with **dbt Core** and **DuckDB** on the public Olist Brazilian e-commerce dataset (about 100k orders across 9 related tables). It turns raw CSV exports into tested, documented, analytics-ready models: staging, intermediate and mart layers, with an incremental fact table.
+An end-to-end analytics engineering project built with **dbt Core** and **DuckDB** on the public Olist Brazilian e-commerce dataset (about 100k orders across 9 related tables). It turns raw CSV exports into tested, documented, analytics-ready models: staging, intermediate and mart layers, with an incremental fact table, a snapshot, custom macros and a generated docs site.
 
-This is the capstone of a 4-week dbt learning journey. Every modeling decision below is based on exploring the raw data first, and the data quirks I found are documented in [Data quirks and decisions](#data-quirks-and-decisions).
+Every modeling decision is based on exploring the raw data first. The quirks I found are documented in [Data quirks and decisions](#data-quirks-and-decisions).
 
 ## Business questions
-1. Which product categories drive the most revenue? *(Phase 3)*
-2. How does late delivery affect review scores?
-3. What share of customers are repeat buyers?
-4. Which states and sellers have the worst delivery performance? *(Phase 3)*
+
+| # | Question | Answered by |
+|---|---|---|
+| 1 | Which product categories drive the most revenue? | `mart_category_revenue` |
+| 2 | How does late delivery affect review scores? | `fct_orders` |
+| 3 | What share of customers are repeat buyers? | `dim_customers` |
+| 4 | Which states and sellers have the worst delivery performance? | `mart_delivery_performance_by_state`, `mart_seller_performance` |
 
 ## Tech stack
 - Python 3.11
@@ -22,8 +25,72 @@ This is the capstone of a 4-week dbt learning journey. Every modeling decision b
 |---|---|---|
 | 1 | Repo setup, raw load, sources, 9 staging models | Done |
 | 2 | Intermediate models, `fct_orders` (incremental), `dim_customers`, tests | Done |
-| 3 | `dim_products`, `dim_sellers`, `fct_order_items`, business marts, snapshot, docs | Upcoming |
-| 4 | CI with GitHub Actions, dev vs prod, optional cloud warehouse | Upcoming |
+| 3 | `dim_products`, `dim_sellers`, `fct_order_items`, business marts, snapshot, docs | Done |
+| 4 | CI with GitHub Actions, dev vs prod targets, optional cloud warehouse | Upcoming |
+
+---
+
+## Lineage
+
+![Lineage graph](images/lineage.png)
+
+The diagram shows sources, staging, intermediate and mart layers. Test nodes are left out to keep it readable. The dashed line is the snapshot, which reads straight from the raw sellers table.
+
+
+</details>
+
+| Layer | Materialization | Purpose |
+|---|---|---|
+| `raw` (schema) | tables | CSVs loaded exactly as received, every column as text |
+| `staging` | views | One model per source table: rename, cast, light cleaning, no joins |
+| `intermediate` | views | Deduplication, aggregation and pivoting so every table has one row per key |
+| `marts` | tables | Business-ready facts, dimensions and metrics |
+| `snapshots` | tables | SCD Type 2 history of seller attributes |
+
+---
+
+## Key findings
+
+All results below come from the delivered orders in the Olist dataset, and revenue is the sum of item prices excluding freight. The dataset reports amounts in Brazilian reais.
+
+### Revenue is concentrated in a few categories
+74 categories exist, and the top 10 account for about 62% of delivered revenue.
+
+| Rank | Category | Revenue | Share |
+|---|---|---|---|
+| 1 | health_beauty | 1,233,132 | 9.33% |
+| 2 | watches_gifts | 1,166,177 | 8.82% |
+| 3 | bed_bath_table | 1,023,435 | 7.74% |
+| 4 | sports_leisure | 954,853 | 7.22% |
+| 5 | computers_accessories | 888,725 | 6.72% |
+
+### Delivery performance varies sharply by region
+The Northeast has roughly twice the late-delivery rate of the South.
+
+| Region | Delivered orders | Late rate |
+|---|---|---|
+| Northeast | 9,044 | 14.33% |
+| North | 1,796 | 9.80% |
+| Central-West | 5,624 | 7.97% |
+| Southeast | 66,193 | 7.45% |
+| South | 13,813 | 7.05% |
+
+The worst state is Alagoas (AL), with 23.9% of orders late and an average delivery time of 24.5 days. Six of the seven highest late rates are Northeast states. State-level average review scores do not move in lockstep with late rates (for example Tocantins has a 12.8% late rate but a 4.15 average score), so the order-level comparison below is the more reliable way to measure the review impact.
+
+### Seller quality
+Among sellers with at least 30 delivered orders, the lowest average review score is 2.39, from a São Paulo seller with 108 orders and a 22% late rate. Sellers with few orders give noisy rates, so rankings use the `orders >= 30` filter.
+
+### Customers and review impact
+
+| Question | Result |
+|---|---|
+| Share of repeat customers | **2.9%** (2,801 of 96,096 customers have more than one delivered order) |
+| Average review score, on-time deliveries | **4.29** (88,644 orders) |
+| Average review score, late deliveries | **2.57** (7,826 orders) |
+
+Late delivery is associated with a review score 1.72 points lower, which is a large gap on a 5-point scale. About 8% of delivered orders arrive late. Repeat purchasing is rare (under 3% of customers), so retention is a much bigger opportunity than the raw numbers suggest, and a bad delivery experience is likely to make it harder.
+
+These averages cover delivered orders that have a review. Eight delivered orders have no delivery date, so they fall outside the on-time and late groups.
 
 ---
 
@@ -31,10 +98,7 @@ This is the capstone of a 4-week dbt learning journey. Every modeling decision b
 
 **Brazilian E-Commerce Public Dataset by Olist** on Kaggle (free account required). Check the license on the dataset page before reusing or redistributing anything derived from it.
 
-The raw CSVs are large and are **not committed** to this repo. To reproduce the project:
-
-1. Download the dataset from Kaggle and unzip it.
-2. Place the 9 files in `olist_analytics/data/raw/`:
+The raw CSVs are large and are **not committed** to this repo. To reproduce the project, download the dataset, unzip it, and place the 9 files in `olist_analytics/data/raw/`:
 
 ```
 olist_customers_dataset.csv
@@ -50,65 +114,15 @@ product_category_name_translation.csv
 
 ---
 
-## Architecture
-
-```mermaid
-flowchart LR
-    subgraph staging
-        stg_orders
-        stg_customers
-        stg_order_items
-        stg_order_payments
-        stg_order_reviews
-        stg_geolocation
-    end
-
-    subgraph intermediate
-        int_order_items_agg
-        int_order_payments_pivoted
-        int_order_reviews_deduped
-        int_geolocation_by_zip
-        int_orders_enriched
-    end
-
-    subgraph marts
-        fct_orders
-        dim_customers
-    end
-
-    stg_order_items --> int_order_items_agg
-    stg_order_payments --> int_order_payments_pivoted
-    stg_order_reviews --> int_order_reviews_deduped
-    stg_geolocation --> int_geolocation_by_zip
-
-    stg_orders --> int_orders_enriched
-    stg_customers --> int_orders_enriched
-    int_order_items_agg --> int_orders_enriched
-    int_order_payments_pivoted --> int_orders_enriched
-    int_order_reviews_deduped --> int_orders_enriched
-
-    int_orders_enriched --> fct_orders
-    int_orders_enriched --> dim_customers
-    int_geolocation_by_zip --> dim_customers
-```
-
-`stg_products`, `stg_sellers` and `stg_product_category_translation` are built in Phase 1 and used by the Phase 3 models.
-
-| Layer | Materialization | Purpose |
-|---|---|---|
-| `raw` (schema) | tables | CSVs loaded exactly as received, every column as text |
-| `staging` | views | One model per source table: rename, cast, light cleaning, no joins |
-| `intermediate` | views | Deduplication, aggregation and pivoting so every table has one row per key |
-| `marts` | tables | Business-ready facts and dimensions |
-
----
-
 ## Repo structure
 
 ```
 dbt-olist-analytics/
 ├── README.md
 ├── .gitignore
+├── images/
+│   ├── lineage.png
+│   └── lineage_dbt_docs.png
 └── olist_analytics/                     # the dbt project (run dbt from here)
     ├── dbt_project.yml
     ├── packages.yml
@@ -116,35 +130,40 @@ dbt-olist-analytics/
     ├── data/
     │   └── raw/                         # 9 Olist CSVs (not committed)
     ├── scripts/
-    │   ├── load_raw.py                  # loads CSVs into DuckDB raw schema
+    │   ├── load_raw.py                  # loads CSVs into the DuckDB raw schema
     │   ├── explore.py                   # data profiling (phase 1)
-    │   ├── explore2.py                  # deeper profiling (phase 2 decisions)
-    │   ├── check_phase2.py              # verifies row counts and a first insight
-    │   └── incremental_demo.py          # simulates new data for the incremental model
+    │   ├── explore2.py                  # deeper profiling for phase 2 decisions
+    │   ├── explore3.py                  # product category translation coverage
+    │   ├── check_phase2.py              # row counts and first insights
+    │   ├── check_phase3.py              # mart results and findings
+    │   ├── incremental_demo.py          # simulates new data for the incremental model
+    │   └── simulate_seller_change.py    # simulates a change for the snapshot
     ├── macros/
-    │   └── days_between.sql
+    │   ├── days_between.sql
+    │   └── state_to_region.sql
     ├── models/
+    │   ├── docs.md                      # doc blocks
     │   ├── staging/
     │   │   ├── sources.yml
     │   │   ├── schema.yml
     │   │   └── stg_*.sql                # 9 models
     │   ├── intermediate/
     │   │   ├── schema.yml
-    │   │   ├── int_order_items_agg.sql
-    │   │   ├── int_order_payments_pivoted.sql
-    │   │   ├── int_order_reviews_deduped.sql
-    │   │   ├── int_geolocation_by_zip.sql
-    │   │   └── int_orders_enriched.sql
+    │   │   └── int_*.sql                # 5 models
     │   └── marts/
     │       ├── schema.yml
     │       ├── fct_orders.sql
-    │       └── dim_customers.sql
-    ├── seeds/
+    │       ├── fct_order_items.sql
+    │       ├── dim_customers.sql
+    │       ├── dim_products.sql
+    │       ├── dim_sellers.sql
+    │       ├── mart_category_revenue.sql
+    │       ├── mart_delivery_performance_by_state.sql
+    │       └── mart_seller_performance.sql
     ├── snapshots/
-    └── tests/
-        ├── assert_delivered_not_before_purchase.sql
-        ├── assert_delivered_orders_have_delivery_date.sql
-        └── assert_enriched_row_count_matches_orders.sql
+    │   └── sellers_snapshot.yml
+    ├── seeds/
+    └── tests/                           # 6 singular tests
 ```
 
 Not committed (see `.gitignore`): `target/`, `logs/`, `dbt_packages/`, `*.duckdb`, `venv/`, `profiles.yml`, `data/raw/`.
@@ -206,10 +225,18 @@ Run everything from the `olist_analytics/` folder, so `path: dev.duckdb` points 
 python scripts/load_raw.py       # raw CSVs -> dev.duckdb (schema: raw)
 dbt deps                         # install dbt_utils
 dbt debug                        # expect "All checks passed"
-dbt build                        # run + test everything in DAG order
+dbt build                        # run, test and snapshot in DAG order
 ```
 
 > DuckDB allows only one writer at a time. Close any script or shell that has `dev.duckdb` open before running dbt.
+
+### 5. Explore the results
+
+```bash
+python scripts/check_phase3.py
+dbt docs generate
+dbt docs serve --port 8081
+```
 
 ---
 
@@ -251,16 +278,11 @@ One model per source table, with renames, type casts and light cleaning only.
 | `stg_geolocation` | one row per coordinate point | About 52 points per zip prefix |
 | `stg_product_category_translation` | one row per category | Portuguese to English names |
 
-### Exploration
-`scripts/explore.py` and `scripts/explore2.py` profile the raw data before any modeling. Their findings drive the Phase 2 design (see the next section).
-
 **Phase 1 result:** 9 staging views built and 8 source tests passed.
 
 ---
 
-## Phase 2: Intermediate models, marts and tests
-
-### Data quirks and decisions
+## Data quirks and decisions
 
 | Finding | Decision |
 |---|---|
@@ -270,7 +292,12 @@ One model per source table, with renames, type casts and light cleaning only.
 | 775 orders have no items: 603 unavailable, 164 canceled, 5 created, 2 invoiced, 1 shipped | None are `delivered`. Use a left join and set `item_count = 0`. |
 | 2,961 orders have more than one payment row | Pivot payments to one row per order with a Jinja loop. |
 | 8 delivered orders have no delivery date | Singular test with `severity: warn`, so the quirk is documented without blocking the build. |
-| 97% of orders are `delivered`, with 7 other statuses | `accepted_values` test lists all 8 statuses. |
+| 97% of orders are `delivered`, with 7 other statuses | `accepted_values` test lists all 8 statuses, and business metrics use delivered orders only. |
+| Some products have no category or no English translation | `coalesce` to the Portuguese name, then `unknown`. |
+
+---
+
+## Phase 2: Intermediate models, marts and tests
 
 ### Intermediate models
 
@@ -300,13 +327,6 @@ group by order_id
 ```
 The `accepted_values` test on `payment_type` fails if a new type appears that the list does not cover.
 
-**Macro (`macros/days_between.sql`):**
-```sql
-{% macro days_between(start_ts, end_ts) %}
-    date_diff('day', {{ start_ts }}, {{ end_ts }})
-{% endmacro %}
-```
-
 ### Marts
 
 **`fct_orders`** is one row per order with value, payment, review and delivery metrics. It is an **incremental** model with a lookback window:
@@ -329,28 +349,7 @@ Why a lookback window instead of a plain `>` filter: an order's status and deliv
 - A customer's location comes from their **latest** order.
 - A **repeat customer** has more than one **delivered** order, so canceled orders do not count.
 
-### Testing
-
-| Type | Examples |
-|---|---|
-| Source tests | `unique` and `not_null` on raw primary keys |
-| Staging tests | `accepted_values` on `order_status`, `payment_type` and `review_score`; `relationships` from orders, items to their parents; `unique_combination_of_columns` on `(order_id, order_item_id)` |
-| Intermediate tests | `unique` and `not_null` on every grain key |
-| Mart tests | `unique` and `not_null` on `order_id` and `customer_unique_id`; `relationships` from `fct_orders` to `dim_customers`; `accepted_range` on review score and payment value |
-| Singular tests | Delivered date is not before purchase date; delivered orders have a delivery date (warn); enriched row count equals order count |
-
-Test arguments use the `arguments:` syntax required by dbt 1.12:
-```yaml
-- accepted_values:
-    arguments:
-      values: ['created', 'approved', 'invoiced', 'processing', 'shipped', 'delivered', 'unavailable', 'canceled']
-```
-
-### Verification scripts
-- `scripts/check_phase2.py` prints row counts for each layer, the repeat-customer split, and average review score for late vs on-time deliveries.
-- `scripts/incremental_demo.py` deletes recent rows from `fct_orders` to simulate new data, so `dbt run --select fct_orders` can be inspected in `target/run/`.
-
-Expected row counts:
+**Phase 2 row counts:**
 
 | Model | Rows |
 |---|---|
@@ -360,15 +359,64 @@ Expected row counts:
 
 ---
 
-## Key findings
+## Phase 3: Dimensions, business marts and snapshot
 
-> Fill these in after running `python scripts/check_phase2.py`.
+| Model | Grain | Rows | Purpose |
+|---|---|---|---|
+| `dim_products` | one row per product | 32,951 | Product attributes with English category names (fallback: Portuguese name, then `unknown`) |
+| `dim_sellers` | one row per seller | 3,095 | Location, region and coordinates |
+| `fct_order_items` | one row per order item | 112,650 | Item price, freight and a surrogate key built from `order_id` and `order_item_id` |
+| `mart_category_revenue` | one row per category | 74 | Revenue, share and rank (delivered orders only) |
+| `mart_delivery_performance_by_state` | one row per state | 27 | Delivery days, late rate, review score |
+| `mart_seller_performance` | one row per seller | 2,970 | Revenue, late rate, review score |
 
-| Question | Result |
+- `fct_order_items` has the same row count as `stg_order_items` (112,650), and a singular test enforces that no items are dropped by the join to orders.
+- `mart_seller_performance` has fewer rows than `dim_sellers` because it only includes sellers with at least one delivered order.
+- It first groups by seller and order, so an order with several items from one seller is counted once.
+- **Revenue definition:** item price excluding freight, on delivered orders only. It is documented with a doc block and shown in the docs site.
+
+### Macros
+
+| Macro | Purpose |
 |---|---|
-| Share of repeat customers | _x%_ of 96,096 customers |
-| Average review score, on-time deliveries | _x.xx_ |
-| Average review score, late deliveries | _x.xx_ |
+| `days_between(start_ts, end_ts)` | Calendar days between two timestamps |
+| `state_to_region(state_col)` | Maps Brazilian states to the five official regions. States it doesn't recognize become `Unknown`, which fails the `accepted_values` test on `region` |
+
+### Snapshot
+
+`sellers_snapshot` is an SCD Type 2 snapshot of the raw sellers table (`check` strategy on zip code, city and state). It reads from the raw source rather than a staging model, so it captures source changes before any transformation.
+
+Olist is a static dataset, so a change is simulated with `scripts/simulate_seller_change.py`. Result of the demo:
+
+| seller_id | seller_city | dbt_valid_from | dbt_valid_to |
+|---|---|---|---|
+| 0015a82c2db000af6aaaf3ae2ecb0532 | santo andre | 2026-11-02 13:24:55 | 2026-11-02 13:26:28 |
+| 0015a82c2db000af6aaaf3ae2ecb0532 | demo city | 2026-11-02 13:26:28 | NULL |
+
+The old version is closed with a `dbt_valid_to` timestamp, and the current version has `NULL`.
+
+---
+
+## Testing
+
+| Type | Examples |
+|---|---|
+| Source tests | `unique` and `not_null` on raw primary keys |
+| Staging tests | `accepted_values` on `order_status`, `payment_type` and `review_score`; `relationships` from orders and items to their parents; `unique_combination_of_columns` on `(order_id, order_item_id)` |
+| Intermediate tests | `unique` and `not_null` on every grain key |
+| Mart tests | `unique` and `not_null` on every primary key; `relationships` between facts and dimensions; `accepted_values` on `region`; `accepted_range` on review score, payment value and late rate |
+| Singular tests | Delivered date is not before purchase date; delivered orders have a delivery date (warn); enriched row count equals order count; fact item count equals staging item count; item prices add up between `fct_order_items` and `fct_orders`; payments cover items plus freight (warn) |
+
+Test arguments use the `arguments:` syntax required by dbt 1.12:
+```yaml
+- accepted_values:
+    arguments:
+      values: ['created', 'approved', 'invoiced', 'processing', 'shipped', 'delivered', 'unavailable', 'canceled']
+```
+
+**Known warnings (by design):**
+- 8 delivered orders have no delivery date (source data quirk).
+- _N_ delivered orders have a payment total that differs from items plus freight by more than 1 (vouchers and installment interest can explain differences). Fill in `N` from your `dbt build` output.
 
 ---
 
@@ -379,11 +427,12 @@ Expected row counts:
 | `python scripts/load_raw.py` | Load raw CSVs into DuckDB |
 | `dbt deps` | Install packages |
 | `dbt debug` | Verify connection and config |
-| `dbt build` | Run and test everything in DAG order |
+| `dbt build` | Run, test and snapshot in DAG order |
+| `dbt snapshot` | Capture seller history |
 | `dbt run --select fct_orders` | Build one model (incremental after the first run) |
 | `dbt run --select fct_orders --full-refresh` | Rebuild the incremental model from scratch |
 | `dbt test --select source:olist` | Test the raw sources |
-| `dbt build --select +dim_customers` | A model and everything upstream |
+| `dbt build --select +mart_seller_performance` | A model and everything upstream |
 | `dbt docs generate` / `dbt docs serve --port 8081` | Documentation and lineage graph |
 
 ---
@@ -399,14 +448,15 @@ Expected row counts:
 | Staging fails with `column not found` | Check the real header with `describe raw.<table>` |
 | `dbt_utils` not found | Run `dbt deps` from the folder containing `packages.yml` |
 | `accepted_values` fails on `payment_type` | A new type exists. Add it to the test and to the Jinja loop |
+| `accepted_values` fails on `region` | The macro returned `Unknown`. Check `select distinct state from dim_sellers` |
 | Row count test fails | A joined model has duplicate keys. Check which `unique` test failed upstream |
+| Snapshot schema not found | With default naming it lands in `main_snapshots`. Run `show all tables` |
 | Folder-level configs ignored | The key under `models:` must match `name:` in `dbt_project.yml` |
 
 ---
 
 ## Roadmap
 
-- **Phase 3:** `dim_products` (English category names), `dim_sellers`, `fct_order_items` with a surrogate key, revenue-by-category and delivery-by-state marts, a snapshot on a dimension, generated docs
 - **Phase 4:** GitHub Actions CI running `dbt build` on pull requests, dev vs prod targets, optional re-run on a cloud warehouse
 
 ## Learning journey
