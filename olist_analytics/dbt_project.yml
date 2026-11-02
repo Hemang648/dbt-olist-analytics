@@ -41,3 +41,6 @@ models:
     marts:
       +materialized: table
       +tags: ['marts']
+    
+    vars:
+      orders_lookback_days: 30
