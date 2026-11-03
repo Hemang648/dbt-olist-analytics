@@ -13,6 +13,9 @@ profiles.yml
 .env
 *.env
 
+# Exception: the CI profile has no credentials (DuckDB is a local file)
+!**/ci/profiles.yml
+
 # ---- Python virtual environments ----
 venv/
 .venv/
@@ -24,7 +27,7 @@ __pycache__/
 # ---- Raw Olist data (large, downloaded from Kaggle) ----
 # **/ makes the rule work no matter which folder it sits in
 **/data/raw/
-
+Brazilian_E-Commerce_Public_Dataset*/
 
 # ---- OS / editor ----
 .DS_Store

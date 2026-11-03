@@ -1,0 +1,9 @@
+# Profile used only by CI and local CI-style runs (dbt ... --profiles-dir ci).
+# DuckDB is a local file, so there are no credentials in this file.
+olist_analytics:
+  target: ci
+  outputs:
+    ci:
+      type: duckdb
+      path: ci.duckdb
+      threads: 4

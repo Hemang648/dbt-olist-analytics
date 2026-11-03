@@ -1,5 +1,8 @@
 # Olist E-Commerce Analytics with dbt Core and DuckDB
 
+[![CI](https://github.com/Hemang648/dbt-olist-analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/Hemang648/dbt-olist-analytics/actions/workflows/ci.yml)
+[Live dbt docs](https://hemang648.github.io/dbt-olist-analytics/)
+
 An end-to-end analytics engineering project built with **dbt Core** and **DuckDB** on the public Olist Brazilian e-commerce dataset (about 100k orders across 9 related tables). It turns raw CSV exports into tested, documented, analytics-ready models: staging, intermediate and mart layers, with an incremental fact table, a snapshot, custom macros and a generated docs site.
 
 Every modeling decision is based on exploring the raw data first. The quirks I found are documented in [Data quirks and decisions](#data-quirks-and-decisions).
@@ -26,7 +29,7 @@ Every modeling decision is based on exploring the raw data first. The quirks I f
 | 1 | Repo setup, raw load, sources, 9 staging models | Done |
 | 2 | Intermediate models, `fct_orders` (incremental), `dim_customers`, tests | Done |
 | 3 | `dim_products`, `dim_sellers`, `fct_order_items`, business marts, snapshot, docs | Done |
-| 4 | CI with GitHub Actions, dev vs prod targets, optional cloud warehouse | Upcoming |
+| 4 | CI with GitHub Actions on a sample dataset, dev/ci/prod targets, docs on GitHub Pages | In progress |
 
 ---
 
@@ -94,7 +97,7 @@ These averages cover delivered orders that have a review. Eight delivered orders
 
 ## Dataset
 
-**Brazilian E-Commerce Public Dataset by Olist** on Kaggle (free account required). Check the license on the dataset page before reusing or redistributing anything derived from it.
+**Brazilian E-Commerce Public Dataset by Olist** on Kaggle (free account required). The data is real and is licensed under [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/). See [Data license and attribution](#data-license-and-attribution).
 
 The raw CSVs are large and are **not committed** to this repo. To reproduce the project, download the dataset, unzip it, and place the 9 files in `olist_analytics/data/raw/`:
 
@@ -118,6 +121,11 @@ product_category_name_translation.csv
 dbt-olist-analytics/
 ├── README.md
 ├── .gitignore
+├── .github/
+│   ├── dependabot.yml                   # keeps action versions current
+│   └── workflows/
+│       ├── ci.yml                       # dbt build on every PR and push to main
+│       └── docs.yml                     # publishes dbt docs to GitHub Pages
 ├── images/
 │   ├── lineage.png
 │   └── lineage_dbt_docs.png
@@ -125,6 +133,9 @@ dbt-olist-analytics/
     ├── dbt_project.yml
     ├── packages.yml
     ├── requirements.txt
+    ├── ci/
+    │   └── profiles.yml                 # credential-free profile for CI
+    ├── ci_data/                         # small committed sample used by CI
     ├── data/
     │   └── raw/                         # 9 Olist CSVs (not committed)
     ├── scripts/
@@ -135,7 +146,8 @@ dbt-olist-analytics/
     │   ├── check_phase2.py              # row counts and first insights
     │   ├── check_phase3.py              # mart results and findings
     │   ├── incremental_demo.py          # simulates new data for the incremental model
-    │   └── simulate_seller_change.py    # simulates a change for the snapshot
+    │   ├── simulate_seller_change.py    # simulates a change for the snapshot
+    │   └── make_ci_sample.py            # builds the small CI sample from the full data
     ├── macros/
     │   ├── days_between.sql
     │   └── state_to_region.sql
@@ -420,6 +432,66 @@ Test arguments use the `arguments:` syntax required by dbt 1.12:
 
 ---
 
+## Phase 4: CI, environments and published docs
+
+### Continuous integration
+
+Every pull request and every push to `main` runs `.github/workflows/ci.yml`:
+
+1. Install dependencies (pip cache enabled)
+2. Load the sample raw data into DuckDB
+3. `dbt deps`
+4. `dbt build --target ci`, which runs models, tests and the snapshot in DAG order
+
+A failing test fails the check, so broken models or bad data cannot be merged unnoticed. The two known data-quality tests are configured as warnings, so they do not fail the job. `run_results.json` and `manifest.json` are uploaded as a build artifact.
+
+### Why CI uses a sample
+
+The full Olist files are large and come from Kaggle, so they are not committed. Instead, `scripts/make_ci_sample.py` builds a small, deterministic sample (3,000 orders by default) from the full raw tables and writes it to `ci_data/`.
+
+- The sample is **referentially closed**: every sampled order brings its customer, items, payments and reviews, and every item brings its product and seller, so relationship tests stay meaningful.
+- Orders are chosen by ordering on a hash of `order_id`, so the sample is repeatable.
+- Geolocation is limited to a few rows per zip prefix to keep the files small.
+- The script checks referential integrity on the files it writes and fails if anything is orphaned.
+- The sample is a modified subset of the Olist data, so it stays under the dataset's CC BY-NC-SA 4.0 license (see `ci_data/DATA_LICENSE.md`).
+
+```bash
+python scripts/load_raw.py                 # full data into dev.duckdb
+python scripts/make_ci_sample.py           # writes olist_analytics/ci_data/*.csv
+```
+
+Because the sample is small, CI proves that the code and tests work, not that the business numbers are right. The findings in this README come from the full dataset.
+
+### Environments
+
+| Target | Database | Used for | Command |
+|---|---|---|---|
+| `dev` | `dev.duckdb` | Local development on the full data | `dbt build` |
+| `prod` | `prod.duckdb` | Full production-style build | `python scripts/load_raw.py prod.duckdb` then `dbt build --target prod` |
+| `ci` | `ci.duckdb` | GitHub Actions and local CI checks on the sample | `OLIST_RAW_DIR=ci_data python scripts/load_raw.py ci.duckdb` then `dbt build --target ci --profiles-dir ci` |
+
+The `ci` profile lives in `ci/profiles.yml`. It contains no credentials (DuckDB is a local file), so it is committed. The personal `profiles.yml` with the `dev` and `prod` targets is not.
+
+To reproduce CI locally on Windows PowerShell:
+
+```powershell
+$env:OLIST_RAW_DIR = "ci_data"
+python scripts/load_raw.py ci.duckdb
+dbt deps --profiles-dir ci
+dbt build --target ci --profiles-dir ci
+```
+
+### Published documentation
+
+`.github/workflows/docs.yml` builds the project on the sample data, runs `dbt docs generate`, and publishes the site to GitHub Pages on every push to `main`. Lineage, descriptions and tests are complete in the published site. Row counts and column statistics reflect the sample.
+
+To enable it once: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+
+### Keeping the pipeline current
+`.github/dependabot.yml` opens a monthly pull request when an action used in the workflows has a newer version. Pin `dbt-core` and `dbt-duckdb` in `requirements.txt` to the versions you tested with, so CI does not break when a new release lands.
+
+---
+
 ## Command cheat sheet
 
 | Command | Purpose |
@@ -457,7 +529,21 @@ Test arguments use the `arguments:` syntax required by dbt 1.12:
 
 ## Roadmap
 
-- **Phase 4:** GitHub Actions CI running `dbt build` on pull requests, dev vs prod targets, optional re-run on a cloud warehouse
+- **Stretch goal:** re-run the project on a cloud warehouse (BigQuery or Postgres). DuckDB-specific SQL such as `date_diff('day', ...)`, `interval '30 days'` and `mode()` would move into cross-database macros (`dbt.datediff`, `dbt.dateadd`).
+
+## Data license and attribution
+
+The Olist dataset is licensed under **CC BY-NC-SA 4.0** ([license text](https://creativecommons.org/licenses/by-nc-sa/4.0/)).
+
+- **Source:** Brazilian E-Commerce Public Dataset by Olist, published on Kaggle. All findings in this README are derived from it.
+- **Attribution:** credit Olist as the data source, link to the license, and note that the data was transformed. The raw files are not redistributed in this repo.
+- **Changes made:** the staging, intermediate and mart models transform the raw data. `ci_data/` contains a sample of about 3,000 orders, with no values altered.
+- **NonCommercial:** this project is for learning and portfolio purposes only, and the data must not be used commercially.
+- **ShareAlike:** the sample files and anything adapted directly from the data are shared under the same license. See `olist_analytics/ci_data/DATA_LICENSE.md`.
+
+The dbt code is separate from the data. Add a `LICENSE` file at the repo root if you want to state the terms for the code, and make clear that it does not cover the data. This section is a plain-language summary, not legal advice.
+
+---
 
 ## Learning journey
 This project builds on a 4-week dbt Core learning repo covering setup, sources and staging, testing and documentation, and incremental models, snapshots, macros and packages.

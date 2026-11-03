@@ -1,0 +1,79 @@
+name: Publish dbt docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deployment finish instead of cancelling it
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: olist_analytics
+
+    env:
+      OLIST_RAW_DIR: ${{ github.workspace }}/olist_analytics/ci_data
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: olist_analytics/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Load sample raw data into DuckDB
+        run: python scripts/load_raw.py ci.duckdb
+
+      - name: Install dbt packages
+        run: dbt deps --profiles-dir ci
+
+      - name: dbt build
+        run: dbt build --target ci --profiles-dir ci
+
+      - name: Generate docs
+        run: dbt docs generate --target ci --profiles-dir ci
+
+      # The docs site is these three static files
+      - name: Collect the site files
+        run: |
+          mkdir -p ../_site
+          cp target/index.html target/manifest.json target/catalog.json ../_site/
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
