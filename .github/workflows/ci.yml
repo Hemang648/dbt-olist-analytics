@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel an older run of the same branch when a new commit arrives
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dbt-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: olist_analytics
+
+    env:
+      # load_raw.py reads the small committed sample instead of the full Kaggle files
+      OLIST_RAW_DIR: ${{ github.workspace }}/olist_analytics/ci_data
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: olist_analytics/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Load sample raw data into DuckDB
+        run: python scripts/load_raw.py ci.duckdb
+
+      - name: Install dbt packages
+        run: dbt deps --profiles-dir ci
+
+      # build = seed + run + snapshot + test in DAG order.
+      # Tests configured as warn (the 2 known data quirks) do not fail the job.
+      - name: dbt build
+        run: dbt build --target ci --profiles-dir ci
+
+      - name: Upload dbt run results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-run-results
+          path: |
+            olist_analytics/target/run_results.json
+            olist_analytics/target/manifest.json
+          if-no-files-found: ignore
