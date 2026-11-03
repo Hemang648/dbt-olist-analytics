@@ -29,7 +29,7 @@ Every modeling decision is based on exploring the raw data first. The quirks I f
 | 1 | Repo setup, raw load, sources, 9 staging models | Done |
 | 2 | Intermediate models, `fct_orders` (incremental), `dim_customers`, tests | Done |
 | 3 | `dim_products`, `dim_sellers`, `fct_order_items`, business marts, snapshot, docs | Done |
-| 4 | CI with GitHub Actions on a sample dataset, dev/ci/prod targets, docs on GitHub Pages | In progress |
+| 4 | CI with GitHub Actions on a sample dataset, dev/ci/prod targets, docs on GitHub Pages | Done |
 
 ---
 
@@ -79,7 +79,7 @@ The Northeast has roughly twice the late-delivery rate of the South.
 The worst state is Alagoas (AL), with 23.9% of orders late and an average delivery time of 24.5 days. Six of the seven highest late rates are Northeast states. State-level average review scores do not move in lockstep with late rates (for example Tocantins has a 12.8% late rate but a 4.15 average score), so the order-level comparison below is the more reliable way to measure the review impact.
 
 ### Seller quality
-Among sellers with at least 30 delivered orders, the lowest average review score is 2.39, from a São Paulo seller with 108 orders and a 22% late rate. Sellers with few orders give noisy rates, so rankings use the `orders >= 30` filter.
+Among sellers with at least 30 delivered orders, the lowest average review score is 2.39, from a seller in the state of São Paulo (SP) with 108 orders and a 22% late rate. Sellers with few orders give noisy rates, so rankings use the `orders >= 30` filter.
 
 ### Customers and review impact
 
@@ -89,7 +89,7 @@ Among sellers with at least 30 delivered orders, the lowest average review score
 | Average review score, on-time deliveries | **4.29** (88,644 orders) |
 | Average review score, late deliveries | **2.57** (7,826 orders) |
 
-Orders delivered late score 1.72 points lower on the 5-point review scale, and about 8% of delivered orders arrive late. Repeat purchasing is rare, so a poor delivery experience hits a customer base that rarely comes back. This is an association, not proof of cause: late orders may also differ in product type or seller.
+Orders delivered late score 1.72 points lower on the 5-point review scale, and about 8% of delivered orders arrive late. Repeat purchasing is rare (2.9%), so most customers are judged on a single order, and late deliveries are rated far lower. This is an association, not proof of cause: late orders may also differ in product type or seller.
 
 These averages cover delivered orders that have a review. Eight delivered orders have no delivery date, so they fall outside the on-time and late groups.
 
@@ -127,8 +127,8 @@ dbt-olist-analytics/
 │       ├── ci.yml                       # dbt build on every PR and push to main
 │       └── docs.yml                     # publishes dbt docs to GitHub Pages
 ├── images/
-│   ├── lineage.png
-│   └── lineage_dbt_docs.png
+│   └── lineage.png
+│   
 └── olist_analytics/                     # the dbt project (run dbt from here)
     ├── dbt_project.yml
     ├── packages.yml
@@ -205,8 +205,9 @@ dbt --version
 
 `requirements.txt`:
 ```
-dbt-core
-dbt-duckdb
+dbt-core==1.12.6
+dbt-duckdb==1.11.1
+duckdb==2.0.0
 ```
 
 ### 3. Add the dbt profile (not committed)
@@ -424,7 +425,7 @@ Test arguments use the `arguments:` syntax required by dbt 1.12:
       values: ['created', 'approved', 'invoiced', 'processing', 'shipped', 'delivered', 'unavailable', 'canceled']
 ```
 
-**Full build result:** `PASS=91 WARN=2 ERROR=0` across 22 models, 70 data tests and 1 snapshot.
+**Full build result (full dataset, dev target):** `PASS=91 WARN=2 ERROR=0` across 22 models, 70 data tests and 1 snapshot.
 
 **Known warnings (by design):**
 - 8 delivered orders have no delivery date (source data quirk).
@@ -535,8 +536,8 @@ To enable it once: **Settings → Pages → Build and deployment → Source: Git
 
 The Olist dataset is licensed under **CC BY-NC-SA 4.0** ([license text](https://creativecommons.org/licenses/by-nc-sa/4.0/)).
 
-- **Source:** Brazilian E-Commerce Public Dataset by Olist, published on Kaggle. All findings in this README are derived from it.
-- **Attribution:** credit Olist as the data source, link to the license, and note that the data was transformed. The raw files are not redistributed in this repo.
+- **Source:** [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce), published on Kaggle. All findings in this README are derived from it.
+- **Attribution:** credit Olist as the data source, link to the license, and note that the data was transformed. The full raw files are not redistributed here; `ci_data/` holds a small modified sample.
 - **Changes made:** the staging, intermediate and mart models transform the raw data. `ci_data/` contains a sample of about 3,000 orders, with no values altered.
 - **NonCommercial:** this project is for learning and portfolio purposes only, and the data must not be used commercially.
 - **ShareAlike:** the sample files and anything adapted directly from the data are shared under the same license. See `olist_analytics/ci_data/DATA_LICENSE.md`.
